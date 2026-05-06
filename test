@@ -1,0 +1,45 @@
+Use Case: Enforce Password Change on Expiry
+
+Actor: Authenticated User (with a usable password)
+
+Preconditions:
+
+· User is already logged into the system.
+· User’s account has a usable password (not unusable, e.g., LDAP or SSO).
+· System configuration contains a value for EXPIRE_PASSWORD_IN_DAYS (e.g., 90 days).
+· The user’s CustomerProfile object exists, containing a login_details dictionary with a last_password_change_utc field storing the UTC timestamp of the last password change.
+
+Trigger: User makes any HTTP request to any URL except /config/password_change/ (or the designated password change endpoint) after their password has expired.
+
+Normal Flow:
+
+1. Middleware intercepts the request.
+2. It checks if the user is authenticated and has a usable password.
+3. It retrieves or creates the user’s CustomerProfile.
+4. It reads last_password_change_utc from login_details.
+5. It calculates the number of days since that timestamp (diff_days).
+6. If diff_days >= EXPIRE_PASSWORD_IN_DAYS, the password is marked as expired.
+7. If the password is expired and the requested URL is not the password change endpoint:
+   · For AJAX requests (X-Requested-With: XMLHttpRequest), the system returns a 401 Unauthorized JSON response with message "Password is expired".
+   · For normal (non-AJAX) requests, the system redirects the user to /config/password_change/.
+8. The user is forced to change their password before accessing any other part of the system.
+
+Postconditions:
+
+· After successfully changing the password, last_password_change_utc is updated to the current UTC time.
+· The password expiry flag resets, and the user can access other pages normally.
+
+Alternative/Exception Flows:
+
+· If last_password_change_utc is missing or malformed, the expiry check is silently skipped (i.e., no forced change).
+· If EXPIRE_PASSWORD_IN_DAYS is 0 or not set, the expiry feature is effectively disabled.
+· If the user does not have a CustomerProfile, one is created on the fly.
+· If the password is not expired, the middleware takes no action (returns None).
+
+---
+
+Functional Requirement
+
+FR‑PWD‑001 – Automatic Password Expiry Enforcement
+
+The system shall track the UTC date and time of each user’s last password change (stored in CustomerProfile.login_details["last_password_change_utc"]). For every authenticated request, the system shall compare the elapsed days since that timestamp against the configured value EXPIRE_PASSWORD_IN_DAYS. If the elapsed days equals or exceeds the configured threshold, the system shall treat the password as expired and, for any request other than the password change endpoint, either (a) redirect the user to the password change page (for browser requests) or (b) return a 401 Unauthorized JSON response (for AJAX requests) with an explicit "Password is expired" message. The system shall update last_password_change_utc to the current UTC time upon successful password change.
